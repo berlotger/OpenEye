@@ -50,6 +50,16 @@ a much smaller frame size than intended.
 for program storage).** The v1 firmware as shipped fits comfortably in the
 default scheme.
 
+## v1.1 / v1.1.1 additions — no new dependencies
+
+`ButtonManager`, `AudioBackend`/`AudioBackendManager`, `STTEngine`, and the
+restructured `WakeWordEngine`/`CommandManager` added in v1.1 use only
+`Arduino.h` core functions (`pinMode`, `digitalRead`, `millis()`) and the
+same `ArduinoJson`/`WiFi.h` already listed above. `CommandManager::
+doRecordAudio()` and `doSetVolume()` (v1.1.1) reuse `AudioManager` and
+`WiFiManager`/`ConfigManager`, already present — no new Library Manager
+entry is needed for any of this.
+
 ## What was deliberately NOT added as a dependency
 
 - **No MP3/AAC decoder library.** Music playback expects mono 16-bit PCM WAV
@@ -57,6 +67,22 @@ default scheme.
   Convert your music with any standard tool (e.g. `ffmpeg -i song.mp3 -ar
   16000 -ac 1 -sample_fmt s16 song.wav`) before copying it to the SD card.
 - **No wake-word / speech-recognition library** (e.g. ESP-SR, Picovoice). See
-  `docs/architecture.md` for why — the interface is ready, nothing is faked.
+  `docs/architecture.md` for why — the interface is ready, nothing is
+  faked. (Note: as of Aug 2026, Espressif's `esp-sr` does ship a pretrained
+  "Jarvis" WakeNet9 model for ESP32-S3 — see that doc for what that does
+  and doesn't change about the integration effort.)
 - **No on-device vision/LLM library.** Same reasoning, see
   `docs/architecture.md`.
+
+## v1.2 AI Offline — two OPTIONAL, EXPERIMENTAL dependencies (neither installed by default)
+
+Both are off unless you deliberately opt in — see
+`docs/architecture.md` "Part 1"/"Part 2" and `docs/installation.md`
+"Enabling MultiNet (experimental)" / "Enabling Edge Impulse vision
+(experimental)" before touching either.
+
+| Dependency | Used by | Install | Notes |
+|---|---|---|---|
+| `ESP_SR` (+ `ESP_I2S`) | `MultiNetSTT.h/.cpp`, `examples/MultiNet_Test` | Ships INSIDE the `esp32` board package itself (Espressif) — no separate Library Manager install. Requires a recent `esp32` core (3.x) so `Examples > ESP-SR > Basic` appears at all. | ESP32-S3 only. Needs `OVE_ENABLE_MULTINET` defined (see top of `XIAO_OpenVisionEye.ino`) AND a Partition Scheme with a reserved MultiNet model partition — **not confirmed to exist for the `XIAO_ESP32S3` board entry at 8MB flash**, see `docs/architecture.md`. |
+| Your own exported Edge Impulse Arduino library | `VisionAI.h`'s `EdgeImpulseVisionAI`, `examples/Vision_Test` | Edge Impulse Studio -> Deployment -> "Arduino library" -> Build -> Sketch > Include Library > Add .ZIP Library | Confirmed to build/run on this exact board by multiple independent sources (see `docs/architecture.md` "Part 2"). There is no generic file to install — it is generated from YOUR OWN trained model, there is nothing this project can ship in advance. Needs `OVE_ENABLE_EDGE_IMPULSE` defined. |
+

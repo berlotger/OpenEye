@@ -90,6 +90,44 @@ without checking your physical board revision — the firmware exposes a single
 `#define BOOT_BUTTON_PIN` in `Config.h`-equivalent for exactly this reason, defaulted
 to the onboard BOOT button (GPIO 0) which already exists on every ESP32-S3 board.
 
+**v1.1 addition — `ButtonManager` GPIO (photo/video/command-mode button):**
+
+The general-purpose header on the plain (non-Sense-specific) part of the XIAO
+ESP32-S3 board exposes 11 pins, independent of the camera/mic FPC connectors:
+
+| Silkscreen | GPIO | Notes |
+|---|---|---|
+| D0 | 1 | free |
+| **D1** | **2** | **free — used as `BUTTON_GPIO` in `ButtonManager.h`** |
+| D2 | 3 | strapping-adjacent, avoid for simple I/O |
+| D3 | 4 | free |
+| D4 | 5 | I2C SDA |
+| D5 | 6 | I2C SCL |
+| D6 | 43 | TX (serial/flash) |
+| D7 | 44 | RX (serial/flash) |
+| D8 | 7 | SPI SCK |
+| D9 | 8 | SPI MISO |
+| D10 | 9 | SPI MOSI |
+
+None of these overlap the camera (10–18, 38–40, 47, 48), mic (41, 42), SD
+CS (21), or BOOT (0) pins listed above — cross-checked against this
+project's own pin usage before picking one, per your requirement not to
+choose a GPIO blindly.
+
+`ButtonManager.h` uses **GPIO2 (silkscreen "D1")** by default:
+
+```
+BUTTON_GPIO = 2
+```
+
+As with every other custom-wiring note on this page: **confirm "D1" against
+your physical board's silkscreen with a multimeter before soldering** —
+Seeed's own header labeling has had minor variation across production
+batches, and this project cannot verify your specific unit. Wiring: one leg
+of a normal momentary pushbutton to GPIO2, the other to GND; the firmware
+uses `INPUT_PULLUP` (HIGH = not pressed, LOW = pressed), so no external
+resistor is needed.
+
 ### 1.6 Battery
 
 **There is no documented, built-in battery-voltage-to-ADC connection on the XIAO
@@ -173,3 +211,18 @@ ESP32 Audio side, same "unknown until configured" behavior.
 | Wi-Fi | ✅ SoftAP | ✅ Station |
 | Bluetooth Classic A2DP | ❌ not possible on this chip | ✅ real (ESP32-A2DP lib) |
 | Battery % | ⚠️ interface ready, circuit not yet defined | ⚠️ interface ready, circuit not yet defined |
+
+## 4. Flash budget for the v1.2 experimental AI features
+
+The XIAO ESP32S3 Sense has **8 MB flash total**, shared by the sketch
+itself, OTA slot (if any), and any model storage. This directly affects
+Part 1 (MultiNet) — see `docs/architecture.md` "Part 1" for the full
+writeup and `docs/installation.md` "Enabling MultiNet (experimental)" for
+what to try. In short: MultiNet's Arduino wrapper wants a dedicated flash
+partition for its model (Espressif's own reference partition scheme for
+this is sized for 16 MB boards), and whether an 8 MB-flash-sized version
+of that scheme is available for this specific board out of the box is
+unverified — treat this as an open hardware question, not a solved one.
+Edge Impulse's Part 2 path does NOT need a special partition — its model
+links directly into your sketch's own app partition, same as any other
+library.
