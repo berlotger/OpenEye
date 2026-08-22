@@ -70,10 +70,19 @@ built into the core (don't install those separately).
    [OK] Microphone
    [N/A] Battery (no circuit configured, see docs/hardware.md)
    [--] Audio ESP32 — will report once it connects over Wi-Fi
+   [SKIP] Button (GPIOx) — wiring not verified in this environment, see docs/hardware.md
+   [--] Audio backend mode: AUTO
    -------------------------
    SSID: OpenVisionEye-XXXXXX
    AP IP: 192.168.4.1
-   Ready. Press BOOT briefly for "Hey Glasses", hold >0.8s for "Hey AI".
+   Ready.
+   Primary control: long-press the button (GPIO2/"D1") to enter command mode,
+   then type a command — e.g. "take a photo", "record audio", "battery".
+   Single-click = photo, double-click = video start/stop (see docs/hardware.md).
+   No button wired yet? Type HEY_GLASSES on the Serial Monitor to open the same
+   command-listening window, then type your command.
+   (Optional legacy path: the "Jarvis" wake-word stub is disabled by default in this version — see config.json's
+    wakeWordEnabled. JARVIS/HEY_JARVIS/HEY_AI text shortcuts still work either way.)
    ```
    If Camera/SD/Wi-Fi show FAIL, see `docs/troubleshooting.md` before
    continuing.
@@ -132,18 +141,23 @@ Put your headphones into pairing mode, reset the ESP32 Audio board, and
 watch its Serial Monitor for connection state logs from the `ESP32-A2DP`
 library (it logs quite verbosely by default, which is useful here).
 
-## 10. First end-to-end test
+## 10. First end-to-end test (button-driven — PRIMARY flow this version)
 
-With both boards powered and connected:
+With both boards powered and connected, wire a normal momentary push-button
+between **GPIO2 ("D1")** and **GND** — no external resistor needed, the
+firmware enables the internal pull-up (`INPUT_PULLUP`). See `docs/hardware.md`
+§1.5 for why this pin was picked and what else was checked against it.
 
-1. On the XIAO, briefly press the **BOOT** button (this is the manual
-   "Hey Glasses" wake-word stub — see `docs/architecture.md`).
-2. Within 8 seconds, type a command into the XIAO's Serial Monitor and
-   press Enter, e.g.:
+Don't have the button wired yet? Every step below also works by typing
+`HEY_GLASSES` into the XIAO's Serial Monitor instead of long-pressing the
+button — it opens the identical command-listening window.
+
+1. **Long-press** the button (or type `HEY_GLASSES`). You have 8 seconds to
+   type a command into the Serial Monitor, e.g.:
    ```
    take a photo
    ```
-3. You should see, on the XIAO:
+2. You should see, on the XIAO:
    ```
    [SAY] Photo taken.
    ```
@@ -151,19 +165,57 @@ With both boards powered and connected:
    the card and check on a computer, or add your own SD-listing command if
    you want one over Serial — not included by default to keep the firmware
    small).
-4. Try:
+3. Each command needs a fresh long-press (or `HEY_GLASSES`) — try:
    ```
-   battery status
+   battery
    ```
    You should get `Battery status is not available. See docs/hardware.md.`
    — this is the **expected, honest** response until you wire the optional
-   battery-divider circuit described there.
-5. If you've copied a WAV file into `/OpenVisionEye/music/`, try:
+   battery-divider circuit described in step 11.
+4. Try the new v1.1.1 audio-recording command:
+   ```
+   record audio
+   ```
+   This blocks for a fixed 5 seconds (documented limitation — see
+   `README.md`), then saves `/OpenVisionEye/audio/REC_000001.wav`.
+5. Try the new v1.1.1 volume command:
+   ```
+   volume 40
+   ```
+   You should see `[SAY] Volume set to 40.` and, on the **ESP32 Audio
+   board's** Serial Monitor, a log line from `BluetoothAudio::setVolume()`.
+6. If you've copied a WAV file into `/OpenVisionEye/music/`, long-press (or
+   `HEY_GLASSES`) again, then:
    ```
    play music
    ```
    and you should hear it (quietly, and with basic-quality resampling —
    see `docs/architecture.md`) through your Bluetooth headphones.
+7. Outside the physical button, **single-click** should take a photo
+   immediately (no listening window), and **double-click** should start,
+   then later stop, video recording.
+8. To change the button mapping without reflashing, type e.g.
+   `BUTTON_SINGLE:VIDEO_TOGGLE` in the Serial Monitor — see
+   `docs/wifi_protocol.md`. The change is saved to `config.json`
+   immediately.
+
+## 10b. (Optional/legacy) The "Jarvis" two-stage flow
+
+This still works, but is **disabled by default** this version
+(`wakeWordEnabled: false` in `config.json`) and is not the primary flow —
+see `docs/architecture.md`. To try it: set `wakeWordEnabled: true` in
+`/OpenVisionEye/config/config.json`, power-cycle, then:
+
+1. Briefly press the **BOOT** button (or type `JARVIS` on the Serial
+   Monitor). You have 6 seconds to respond.
+2. Type a mode word and press Enter:
+   ```
+   glasses
+   ```
+   You now have 8 seconds to type a command, same as above.
+
+The BOOT-button trigger only works with `wakeWordEnabled: true`; the
+`JARVIS`/`HEY_JARVIS`/`HEY_AI` text shortcuts work regardless of the flag.
 
 ## 11. (Optional) Wire the battery-voltage divider
 
@@ -180,3 +232,84 @@ See `docs/hardware.md` §1.6. Once wired:
    against a multimeter on the battery pads at least once — the divider's
    exact resistor values and your specific ADC's calibration both affect
    accuracy, and this project doesn't attempt to auto-calibrate that for you.
+
+## 12. (Optional, EXPERIMENTAL) Enabling MultiNet offline voice commands
+
+Read `docs/architecture.md` "Part 1 — offline voice command recognition"
+and `MultiNetSTT.h` first — this is not confirmed to work on the 8MB-flash
+XIAO ESP32S3 Sense, and a dated forum report shows the stock example
+crashing at boot on this exact board.
+
+1. Test in isolation FIRST: open `examples/MultiNet_Test/MultiNet_Test.ino`
+   on its own (not the main firmware). This has zero dependency on the
+   rest of the project.
+2. **Tools > Partition Scheme**: look for an entry that reserves a
+   MultiNet model partition (something with "SR" in the name — Espressif's
+   own examples use names like "ESP SR 16M"). If nothing like that appears
+   for the `XIAO_ESP32S3` board, that is the actual blocker described in
+   `docs/architecture.md` — there is no known workaround documented here,
+   because none was found. Options to try, roughly in order of effort:
+   - Check whether a newer `esp32` board package version (Boards Manager)
+     added an 8MB-flash "esp_sr" partition entry for this board — this
+     changes over time and should be re-checked.
+   - Try `Tools > Custom Partition CSV` (if your Arduino IDE / board
+     package version supports it) with a hand-written `partitions.csv`
+     that reserves a `model` partition of a few MB, sized to fit in 8MB
+     alongside your app — this requires understanding ESP32 partition
+     tables; see Espressif's partition-table docs.
+   - Investigate `CONFIG_MODEL_IN_SDCARD` (seen in `ESP_SR`'s own source)
+     as an alternative to a flash model partition — NOT confirmed how (or
+     whether) this is reachable from the Arduino IDE Tools menu for this
+     board. If you get this working, please document it — this project
+     genuinely doesn't know the answer.
+3. **Tools > PSRAM**: OPI PSRAM (same as the main firmware).
+4. Once `MultiNet_Test.ino` reliably prints `[OK] MultiNet model loaded`
+   and recognizes real spoken commands, only then move to the main
+   firmware:
+   - Uncomment `#define OVE_ENABLE_MULTINET` at the top of
+     `XIAO_OpenVisionEye.ino`.
+   - Recompile and flash.
+   - Send `VOICE_MODE:MULTINET` over Serial/TCP, then power-cycle (the
+     mode is read once at boot).
+   - Check `DIAG` output: `[OK] MultiNet model loaded` means it's live;
+     `[FAIL]` means the same partition-table problem as step 2.
+5. Regenerate the phonetic command table before trusting recognition
+   accuracy — `MultiNetSTT.cpp`'s table was hand-written, not run through
+   Espressif's own `tools/gen_sr_commands.py` in this environment (that
+   script lives in the `esp-sr` repo/ESP-IDF component, not in this
+   project). This is flagged in the source comment, not hidden.
+
+## 13. (Optional, EXPERIMENTAL) Enabling Edge Impulse vision
+
+Read `docs/architecture.md` "Part 2 — offline object detection" and the
+big comment above `EdgeImpulseVisionAI` in `VisionAI.h` first. Unlike
+MultiNet above, this path is confirmed by several independent sources to
+work on this exact board — the remaining work is entirely on your side
+(training a model), not a toolchain fight.
+
+1. Create a free Edge Impulse account, create a new project.
+2. Collect training images of `person` / `shoe` / `bottle` (per your
+   spec's initial classes) — Edge Impulse's docs cover this; you can use
+   the XIAO's own camera (via the existing `examples/XIAO_camera_only`
+   sketch or a web-server capture sketch) or your phone.
+3. In Edge Impulse Studio: add an "Object Detection" learning block, pick
+   **FOMO (Faster Objects, More Objects)** as the architecture (not
+   MobileNet-SSD — FOMO is the one confirmed practical on this chip's
+   budget, per `docs/architecture.md`), train.
+4. **Deployment tab > "Arduino library" > Build.** Download the `.zip`.
+5. In Arduino IDE: **Sketch > Include Library > Add .ZIP Library...**,
+   select the file you just downloaded.
+6. Test in isolation FIRST: open `examples/Vision_Test/Vision_Test.ino`,
+   uncomment its `#include` line and replace it with the exact header name
+   your export produced (check the `.zip`'s `src/` folder — it's named
+   after your Edge Impulse project). Under `File > Examples`, your
+   library's own bundled `esp32 > esp32_camera` example is a more reliable
+   starting point for the camera-frame-to-model-input conversion than the
+   commented-out sketch of that step in `Vision_Test.ino` — copy the real
+   conversion code from there.
+7. Once detections print correctly to Serial with class/confidence/box/
+   position, only then move to the main firmware: uncomment
+   `#define OVE_ENABLE_EDGE_IMPULSE` at the top of `XIAO_OpenVisionEye.ino`,
+   replace the placeholder `#include` in `VisionAI.h`'s
+   `EdgeImpulseVisionAI` block with your real header name, send
+   `VISION_MODE:LOCAL`, recompile, flash.

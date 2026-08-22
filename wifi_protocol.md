@@ -33,7 +33,7 @@ tiny and infrequent.
 | `STOP` | either | Stop playback entirely |
 | `NEXT` | either | Skip to next track |
 | `PREVIOUS` | either | Go to previous track |
-| `VOLUME:<0-100>` | either | Set output volume |
+| `VOLUME:<0-100>` | either | Set output volume — v1.1.1: the XIAO now actually sends this (`CommandManager::doSetVolume()`, triggered by the "volume \<n\>" command); the Audio hub has understood it since v1.0 (`bluetoothAudio.setVolume()`) |
 | `BATTERY` | either | Request battery status from the other board |
 | `BATTERY:<0-100 or UNKNOWN>` | either | Battery status reply |
 | `PHOTO_TAKEN` | XIAO → Audio | A photo was just captured (Audio may play a shutter/confirmation sound) |
@@ -44,9 +44,47 @@ tiny and infrequent.
 | `PING` | either | Liveness check |
 | `PONG` | either | Reply to `PING` |
 
-Unknown commands are logged and ignored — the protocol is meant to be extended
-(new verbs) without breaking older firmware on the other board, per the
-"extensible" requirement.
+Unknown Audio-hub protocol tokens don't just get logged and dropped: the XIAO
+falls them through to `CommandManager::handleIncomingText()`, the same path
+Serial input uses. That's what lets a PC on the XIAO's SoftAP — e.g.
+`tools/send_command.py` — drive the button-equivalent command pipeline over
+TCP (`HEY_GLASSES`, then e.g. `take a photo`) without an on-device STT
+engine, and also what makes the diagnostic and button-config commands below
+work from either Serial or TCP:
+
+| Command | Direction | Meaning |
+|---|---|---|
+| `AUDIO_TEST` | → XIAO | Generates a 440Hz/1s sine tone and streams it down the real pipeline (Wi-Fi → ESP32 Audio → A2DP → headphones), through whichever `AudioBackend` is active. If you hear it, the whole audio path works, independent of the mic or SD card. See `AudioManager::generateSineTone()`. |
+| `PING_TEST` | → XIAO | XIAO sends `PING` to the Audio hub and reports the round-trip time in ms once `PONG` comes back (logged over Serial). Different from raw `PING`/`PONG`, which is just a liveness check with no timing. |
+| `HEY_GLASSES` | → XIAO | **Primary test shortcut in v1.1.1**: opens the same single-stage command-listening window a button long-press would — bench-testing stand-in for the physical button, see `docs/architecture.md`. Next line is a command, e.g. `take a photo`, `record audio`, `volume 50`. |
+| `JARVIS` / `HEY_JARVIS` | → XIAO | Legacy/secondary path (disabled-by-default automatic trigger, see `wakeWordEnabled` in `config.json`): injects the "Jarvis" wake word manually — opens a mode-select window. This text command always works regardless of the flag. See `docs/architecture.md`. |
+| `HEY_AI` | → XIAO | Skips straight to the AI-question listening window (part of the legacy Jarvis-flow's two modes) without needing `JARVIS` + a mode word first. |
+| `BUTTON_SINGLE:<ACTION>` | → XIAO | Remaps `ButtonManager`'s single-click action and persists it to `config.json`. `<ACTION>` is one of `PHOTO`, `VIDEO_TOGGLE`, `COMMAND_MODE`, `NONE`. |
+| `BUTTON_DOUBLE:<ACTION>` | → XIAO | Same, for double-click. |
+| `BUTTON_LONG:<ACTION>` | → XIAO | Same, for long-press. |
+
+Once inside the command-listening window (via the button or `HEY_GLASSES`),
+the recognized command phrases are: `take a photo`, `start recording`,
+`stop recording`, `record audio` (v1.1.1 — fixed 5s WAV to
+`/OpenVisionEye/audio/`), `volume <0-100>` (v1.1.1), `play music`, `pause
+music`, `next song`, `previous song`, `battery` — see
+`CommandManager::dispatchGlassesCommand()` for the exact matching.
+
+Note: the `BUTTON_*` and `JARVIS`/`HEY_*` commands are handled entirely on
+the XIAO — they are local firmware config/test commands, not part of the
+XIAO↔Audio-hub protocol proper. They're listed here because they happen to
+travel over the same TCP control port when sent from a PC tool (see
+"single client only" below), not because the ESP32 Audio board does
+anything with them.
+
+**Single client only (v1 limitation):** the control server (port 3333) and
+audio server (port 3334) each hold exactly one TCP client at a time. In
+normal operation that's the ESP32 Audio board on both. If you connect a PC
+test tool to port 3333 while the real Audio hub is also trying to connect,
+they contend for that one control-channel slot — fine for bench testing,
+not something to rely on together in the field. A future version could add
+a second, PC-only diagnostic port instead of sharing this one; not done in
+v1 to avoid extra surface area before the core pipeline is proven.
 
 ## Audio channel (TCP port 3334)
 
